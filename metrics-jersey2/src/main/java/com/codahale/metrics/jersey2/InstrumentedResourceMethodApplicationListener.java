@@ -37,9 +37,9 @@ import static com.codahale.metrics.MetricRegistry.name;
 public class InstrumentedResourceMethodApplicationListener implements ApplicationEventListener, ModelProcessor {
 
     private final MetricRegistry metrics;
-    private ConcurrentMap<Method, Timer> timers = new ConcurrentHashMap<>();
-    private ConcurrentMap<Method, Meter> meters = new ConcurrentHashMap<>();
-    private ConcurrentMap<Method, ExceptionMeterMetric> exceptionMeters = new ConcurrentHashMap<>();
+    private ConcurrentMap<String, Timer> timers = new ConcurrentHashMap<>();
+    private ConcurrentMap<String, Meter> meters = new ConcurrentHashMap<>();
+    private ConcurrentMap<String, ExceptionMeterMetric> exceptionMeters = new ConcurrentHashMap<>();
 
     /**
      * Construct an application event listener using the given metrics registry.
@@ -74,18 +74,19 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
     }
 
     private static class TimerRequestEventListener implements RequestEventListener {
-        private final ConcurrentMap<Method, Timer> timers;
+        private final ConcurrentMap<String, Timer> timers;
         private Timer.Context context = null;
 
-        public TimerRequestEventListener(final ConcurrentMap<Method, Timer> timers) {
+        public TimerRequestEventListener(final ConcurrentMap<String, Timer> timers) {
             this.timers = timers;
         }
 
         @Override
         public void onEvent(RequestEvent event) {
             if (event.getType() == RequestEvent.Type.RESOURCE_METHOD_START) {
-                final Timer timer = this.timers.get(event.getUriInfo()
-                        .getMatchedResourceMethod().getInvocable().getDefinitionMethod());
+            	final String resourceMethodName = name(event.getUriInfo().getMatchedResourceMethod().getInvocable().getHandler().getHandlerClass().getCanonicalName(), 
+						event.getUriInfo().getMatchedResourceMethod().getInvocable().getDefinitionMethod().getName());
+                final Timer timer = this.timers.get(resourceMethodName);
                 if (timer != null) {
                     this.context = timer.time();
                 }
@@ -98,17 +99,18 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
     }
 
     private static class MeterRequestEventListener implements RequestEventListener {
-        private final ConcurrentMap<Method, Meter> meters;
+        private final ConcurrentMap<String, Meter> meters;
 
-        public MeterRequestEventListener(final ConcurrentMap<Method, Meter> meters) {
+        public MeterRequestEventListener(final ConcurrentMap<String, Meter> meters) {
             this.meters = meters;
         }
 
         @Override
         public void onEvent(RequestEvent event) {
             if (event.getType() == RequestEvent.Type.RESOURCE_METHOD_START) {
-                final Meter meter = this.meters.get(event.getUriInfo()
-                        .getMatchedResourceMethod().getInvocable().getDefinitionMethod());
+            	final String resourceMethodName = name(event.getUriInfo().getMatchedResourceMethod().getInvocable().getHandler().getHandlerClass().getCanonicalName(), 
+														event.getUriInfo().getMatchedResourceMethod().getInvocable().getDefinitionMethod().getName());
+                final Meter meter = this.meters.get(resourceMethodName);
                 if (meter != null) {
                     meter.mark();
                 }
@@ -117,9 +119,9 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
     }
 
     private static class ExceptionMeterRequestEventListener implements RequestEventListener {
-        private final ConcurrentMap<Method, ExceptionMeterMetric> exceptionMeters;
+        private final ConcurrentMap<String, ExceptionMeterMetric> exceptionMeters;
 
-        public ExceptionMeterRequestEventListener(final ConcurrentMap<Method, ExceptionMeterMetric> exceptionMeters) {
+        public ExceptionMeterRequestEventListener(final ConcurrentMap<String, ExceptionMeterMetric> exceptionMeters) {
             this.exceptionMeters = exceptionMeters;
         }
 
@@ -127,14 +129,17 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
         public void onEvent(RequestEvent event) {
             if (event.getType() == RequestEvent.Type.ON_EXCEPTION) {
                 final ResourceMethod method = event.getUriInfo().getMatchedResourceMethod();
-                final ExceptionMeterMetric metric = (method != null) ?
-                        this.exceptionMeters.get(method.getInvocable().getDefinitionMethod()) : null;
+                if (method != null) {
+                	final String resourceMethodName = name(event.getUriInfo().getMatchedResourceMethod().getInvocable().getHandler().getHandlerClass().getCanonicalName(), 
+    														event.getUriInfo().getMatchedResourceMethod().getInvocable().getDefinitionMethod().getName());
+                	final ExceptionMeterMetric metric = this.exceptionMeters.get(resourceMethodName);
 
-                if (metric != null) {
-                    if (metric.cause.isAssignableFrom(event.getException().getClass()) ||
-                            (event.getException().getCause() != null &&
-                                    metric.cause.isAssignableFrom(event.getException().getCause().getClass()))) {
-                        metric.meter.mark();
+                    if (metric != null) {
+                        if (metric.cause.isAssignableFrom(event.getException().getClass()) ||
+                                (event.getException().getCause() != null &&
+                                        metric.cause.isAssignableFrom(event.getException().getCause().getClass()))) {
+                            metric.meter.mark();
+                        }
                     }
                 }
             }
@@ -206,27 +211,33 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
     private void registerTimedAnnotations(final ResourceMethod method) {
         final Method definitionMethod = method.getInvocable().getDefinitionMethod();
         final Timed annotation = definitionMethod.getAnnotation(Timed.class);
-
+        final String resourceMethodName = name(method.getInvocable().getHandler().getHandlerClass().getCanonicalName(), 
+        										definitionMethod.getName());
+        
         if (annotation != null) { 
-            timers.putIfAbsent(definitionMethod, timerMetric(this.metrics, method, annotation));
+            timers.putIfAbsent(resourceMethodName, timerMetric(this.metrics, method, annotation));
         }
     }
 
     private void registerMeteredAnnotations(final ResourceMethod method) {
         final Method definitionMethod = method.getInvocable().getDefinitionMethod();
         final Metered annotation = definitionMethod.getAnnotation(Metered.class);
-
+        final String resourceMethodName = name(method.getInvocable().getHandler().getHandlerClass().getCanonicalName(), 
+												definitionMethod.getName());
+        
         if (annotation != null) { 
-            meters.putIfAbsent(definitionMethod, meterMetric(metrics, method, annotation));
+            meters.putIfAbsent(resourceMethodName, meterMetric(metrics, method, annotation));
         }
     }
 
     private void registerExceptionMeteredAnnotations(final ResourceMethod method) {
         final Method definitionMethod = method.getInvocable().getDefinitionMethod();
         final ExceptionMetered annotation = definitionMethod.getAnnotation(ExceptionMetered.class);
-
+        final String resourceMethodName = name(method.getInvocable().getHandler().getHandlerClass().getCanonicalName(), 
+												definitionMethod.getName());
+        
         if (annotation != null) { 
-            exceptionMeters.putIfAbsent(definitionMethod, new ExceptionMeterMetric(metrics, method, annotation));
+            exceptionMeters.putIfAbsent(resourceMethodName, new ExceptionMeterMetric(metrics, method, annotation));
         }
     }
 
@@ -249,10 +260,10 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
             if (absolute) {
                 return explicitName;
             }
-            return name(method.getInvocable().getDefinitionMethod().getDeclaringClass(), explicitName);
+            return name(method.getInvocable().getHandler().getHandlerClass().getCanonicalName(), explicitName);
         }
 
-        return name(name(method.getInvocable().getDefinitionMethod().getDeclaringClass(),
+        return name(name(method.getInvocable().getHandler().getHandlerClass().getCanonicalName(),
                         method.getInvocable().getDefinitionMethod().getName()),
                 suffixes);
     }

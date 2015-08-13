@@ -3,6 +3,7 @@ package com.codahale.metrics.jersey2;
 import com.codahale.metrics.Meter;
 import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.Timer;
+import com.codahale.metrics.jersey2.resources.InstrumentedInheritanceResource;
 import com.codahale.metrics.jersey2.resources.InstrumentedResource;
 import com.codahale.metrics.jersey2.resources.InstrumentedSubResource;
 import org.glassfish.jersey.client.ClientResponse;
@@ -41,6 +42,7 @@ public class SingletonMetricsJerseyTest extends JerseyTest {
         ResourceConfig config = new ResourceConfig();
         config = config.register(new MetricsFeature(this.registry));
         config = config.register(InstrumentedResource.class);
+        config = config.register(InstrumentedInheritanceResource.class);
 
         return config;
     }
@@ -116,6 +118,18 @@ public class SingletonMetricsJerseyTest extends JerseyTest {
                 .isEqualTo("yay");
 
         final Timer timer = registry.timer(name(InstrumentedSubResource.class, "timed"));
+        assertThat(timer.getCount()).isEqualTo(1);
+
+    }
+    
+    @Test
+    public void inheritanceResourceRegisterMetrics() {
+        assertThat(target("inheritance/timed")
+                .request()
+                .get(String.class))
+                .isEqualTo("yay");
+
+        final Timer timer = registry.timer(name(InstrumentedInheritanceResource.class, "timed"));
         assertThat(timer.getCount()).isEqualTo(1);
 
     }
